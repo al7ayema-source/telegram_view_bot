@@ -2,6 +2,7 @@ import os
 import time
 import random
 import threading
+import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -10,8 +11,19 @@ from selenium.webdriver.support import expected_conditions as EC
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# تفعيل التسجيل (Logging)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # ============ توكن البوت ============
-TOKEN = os.environ.get("BOT_TOKEN", "ضع_التوكن_هنا")
+TOKEN = os.environ.get("BOT_TOKEN")
+
+if not TOKEN:
+    logger.error("❌ لم يتم العثور على توكن البوت!")
+    exit(1)
 
 # ============ سيناريوهات المشاهدة ============
 SCENARIOS = [
@@ -60,7 +72,7 @@ def perform_view(driver, url, view_ratio, like=False):
         time.sleep(2)
         return True
     except Exception as e:
-        print(f"خطأ في المشاهدة: {e}")
+        logger.error(f"خطأ في المشاهدة: {e}")
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,20 +98,32 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def run_test():
         driver = None
         try:
+            logger.info("✅ بدء تشغيل المتصفح...")
             driver = setup_driver()
+            logger.info("✅ تم تشغيل المتصفح بنجاح")
+            
             for i, scenario in enumerate(SCENARIOS, 1):
-                time.sleep(random.randint(30, 90))
+                delay = random.randint(30, 90)
+                logger.info(f"📌 السيناريو {i}/21 - انتظار {delay} ثانية")
+                time.sleep(delay)
+                
+                logger.info(f"▶️ تنفيذ السيناريو {i}/21")
                 perform_view(driver, url, scenario["view"], scenario["like"])
+                
                 if i % 5 == 0:
                     try:
                         status_msg.edit_text(f"🔄 جاري التنفيذ\n✅ تم: {i}/21")
                     except:
                         pass
+            
             try:
                 status_msg.edit_text("✅ *اكتمل الاختبار!*\n\nتم تنفيذ جميع السيناريوهات الـ 21")
             except:
                 pass
+            logger.info("✅ اكتمل الاختبار بنجاح!")
+            
         except Exception as e:
+            logger.error(f"❌ خطأ: {e}")
             try:
                 status_msg.edit_text(f"❌ *خطأ*\n\n{str(e)[:200]}")
             except:
@@ -107,25 +131,35 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             if driver:
                 driver.quit()
+                logger.info("✅ تم إغلاق المتصفح")
     
     thread = threading.Thread(target=run_test)
     thread.start()
 
 def main():
-    token = os.environ.get("BOT_TOKEN")
-    if not token:
-        print("❌ خطأ: لم يتم العثور على توكن البوت")
-        print("يرجى إضافة BOT_TOKEN في متغيرات البيئة")
-        return
+    logger.info("🚀 بدء تشغيل البوت...")
+    logger.info(f"📱 التوكن: {TOKEN[:10]}... (مخفي)")
     
     try:
-        app = Application.builder().token(token).build()
+        app = Application.builder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video))
-        print("✅ البوت يعمل بنجاح!")
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+        logger.info("✅ البوت يعمل بنجاح! جاهز لاستقبال الأوامر")
+        
+        # بدء البوت مع منع الخروج
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        
     except Exception as e:
-        print(f"❌ خطأ في تشغيل البوت: {e}")
+        logger.error(f"❌ خطأ في تشغيل البوت: {e}")
+        raise
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"❌ خطأ فادح: {e}")
+        # البقاء قيد التشغيل حتى لو حدث خطأ
+        while True:
+            time.sleep(60)
+            logger.info("🔄 محاولة إعادة التشغيل...")
