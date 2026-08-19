@@ -11,30 +11,18 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ============ توكن البوت ============
-TOKEN = os.environ.get("BOT_TOKEN", "ضع_التوكن_هنا_احتياطياً")
+TOKEN = os.environ.get("BOT_TOKEN", "ضع_التوكن_هنا")
 
 # ============ سيناريوهات المشاهدة ============
 SCENARIOS = [
-    {"view": 1.0, "like": True, "action": "مشاهدة كاملة + لايك"},
-    {"view": 1.0, "like": True, "action": "مشاهدة كاملة + لايك (تكرار)"},
-    {"view": 0.5, "like": False, "action": "مشاهدة 50%"},
-    {"view": 0.25, "like": False, "action": "مشاهدة 25%"},
-    {"view": 0.5, "like": False, "action": "مشاهدة 50% بدون لايك"},
-    {"view": 1.0, "like": True, "action": "مشاهدة كاملة + لايك"},
-    {"view": 0.75, "like": False, "action": "مشاهدة 75%"},
-]
-
-def generate_scenarios():
-    all_scenarios = []
-    for cycle in range(3):
-        for scenario in SCENARIOS:
-            scenario_copy = scenario.copy()
-            scenario_copy['cycle'] = cycle + 1
-            scenario_copy['delay'] = random.randint(30, 90)
-            all_scenarios.append(scenario_copy)
-        if cycle < 2:
-            all_scenarios.append({'delay_between': random.randint(300, 600)})
-    return all_scenarios
+    {"view": 1.0, "like": True},
+    {"view": 1.0, "like": True},
+    {"view": 0.5, "like": False},
+    {"view": 0.25, "like": False},
+    {"view": 0.5, "like": False},
+    {"view": 1.0, "like": True},
+    {"view": 0.75, "like": False},
+] * 3
 
 def setup_driver():
     options = Options()
@@ -43,18 +31,10 @@ def setup_driver():
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
     options.add_argument('--window-size=390,844')
-    options.add_argument('--user-agent=Mozilla/5.0 (Linux; Android 11; SM-G998B) AppleWebKit/537.36')
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(options=options)
-    driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-        'source': '''
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        '''
-    })
     return driver
 
 def perform_view(driver, url, view_ratio, like=False):
@@ -79,7 +59,8 @@ def perform_view(driver, url, view_ratio, like=False):
         driver.back()
         time.sleep(2)
         return True
-    except:
+    except Exception as e:
+        print(f"خطأ في المشاهدة: {e}")
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,7 +72,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
-    user = update.effective_user.first_name
     
     if not (url.startswith('http://') or url.startswith('https://')):
         await update.message.reply_text("❌ الرجاء إرسال رابط صحيح")
@@ -99,27 +79,31 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     status_msg = await update.message.reply_text(
         f"🔄 *بدء الاختبار*\n"
-        f"📱 المستخدم: {user}\n"
         f"🔢 عدد السيناريوهات: 21\n"
         f"⏱️ المدة المتوقعة: 30-45 دقيقة"
     )
     
     def run_test():
-        scenarios = generate_scenarios()
         driver = None
         try:
             driver = setup_driver()
-            for i, scenario in enumerate(scenarios, 1):
-                if 'delay_between' in scenario:
-                    time.sleep(scenario['delay_between'])
-                    continue
-                time.sleep(scenario['delay'])
-                perform_view(driver, url, scenario['view'], scenario['like'])
-                if i % 5 == 0 or i == len(scenarios):
-                    threading.Thread(target=lambda: update_status(status_msg, i, len(scenarios))).start()
-            threading.Thread(target=lambda: finalize_test(status_msg)).start()
+            for i, scenario in enumerate(SCENARIOS, 1):
+                time.sleep(random.randint(30, 90))
+                perform_view(driver, url, scenario["view"], scenario["like"])
+                if i % 5 == 0:
+                    try:
+                        status_msg.edit_text(f"🔄 جاري التنفيذ\n✅ تم: {i}/21")
+                    except:
+                        pass
+            try:
+                status_msg.edit_text("✅ *اكتمل الاختبار!*\n\nتم تنفيذ جميع السيناريوهات الـ 21")
+            except:
+                pass
         except Exception as e:
-            threading.Thread(target=lambda: error_test(status_msg, str(e))).start()
+            try:
+                status_msg.edit_text(f"❌ *خطأ*\n\n{str(e)[:200]}")
+            except:
+                pass
         finally:
             if driver:
                 driver.quit()
@@ -127,37 +111,21 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     thread = threading.Thread(target=run_test)
     thread.start()
 
-def update_status(status_msg, current, total):
-    try:
-        status_msg.edit_text(
-            f"🔄 *جاري التنفيذ*\n"
-            f"✅ تم: {current}/{total}"
-        )
-    except:
-        pass
-
-def finalize_test(status_msg):
-    try:
-        status_msg.edit_text("✅ *اكتمل الاختبار!*\n\nتم تنفيذ جميع السيناريوهات الـ 21")
-    except:
-        pass
-
-def error_test(status_msg, error):
-    try:
-        status_msg.edit_text(f"❌ *خطأ*\n\n{error[:200]}")
-    except:
-        pass
-
 def main():
-    if not TOKEN or TOKEN == "ضع_التوكن_هنا_احتياطياً":
+    token = os.environ.get("BOT_TOKEN")
+    if not token:
         print("❌ خطأ: لم يتم العثور على توكن البوت")
+        print("يرجى إضافة BOT_TOKEN في متغيرات البيئة")
         return
     
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video))
-    print("🤖 البوت يعمل...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        app = Application.builder().token(token).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video))
+        print("✅ البوت يعمل بنجاح!")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        print(f"❌ خطأ في تشغيل البوت: {e}")
 
 if __name__ == "__main__":
-    main()  
+    main()
